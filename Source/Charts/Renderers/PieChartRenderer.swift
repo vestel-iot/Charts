@@ -123,8 +123,6 @@ open class PieChartRenderer: NSObject, DataRenderer
         let drawAngles = chart.drawAngles
         let center = chart.centerCircleBox
         let radius = chart.radius
-        let drawInnerArc = chart.drawHoleEnabled && !chart.drawSlicesUnderHoleEnabled
-        let userInnerRadius = drawInnerArc ? radius * chart.holeRadiusPercent : 0.0
 
         var visibleAngleCount = 0
         for j in 0 ..< entryCount
@@ -137,6 +135,8 @@ open class PieChartRenderer: NSObject, DataRenderer
         }
 
         let sliceSpace = visibleAngleCount <= 1 ? 0.0 : getSliceSpace(dataSet: dataSet)
+        let drawInnerArc = chart.drawHoleEnabled && !chart.drawSlicesUnderHoleEnabled || sliceSpace > 0.0
+        let userInnerRadius = drawInnerArc ? radius * chart.holeRadiusPercent : 0.0
 
         context.saveGState()
 
@@ -180,7 +180,7 @@ open class PieChartRenderer: NSObject, DataRenderer
                 continue
             }
         
-            let accountForSliceSpacing = sliceSpace > 0.0 && sliceAngle <= 180.0
+            let accountForSliceSpacing = sliceSpace > 0.0
 
             context.setFillColor(dataSet.color(atIndex: j).cgColor)
 
@@ -207,6 +207,8 @@ open class PieChartRenderer: NSObject, DataRenderer
             if drawInnerArc &&
                 (innerRadius > 0.0 || accountForSliceSpacing)
             {
+                var hasZeroInnerRadius = innerRadius == 0.0
+
                 if accountForSliceSpacing
                 {
                     var minSpacedRadius = calculateMinimumRadiusForSpacedSlice(
@@ -235,41 +237,28 @@ open class PieChartRenderer: NSObject, DataRenderer
                 }
                 let endAngleInner = startAngleInner + sweepAngleInner
 
-                path.addLine(
-                    to: CGPoint(
-                        x: center.x + innerRadius * cos(endAngleInner.DEG2RAD),
-                        y: center.y + innerRadius * sin(endAngleInner.DEG2RAD)))
-
-                path.addRelativeArc(center: center, radius: innerRadius, startAngle: endAngleInner.DEG2RAD, delta: -sweepAngleInner.DEG2RAD)
-            }
-            else
-            {
-                if accountForSliceSpacing
+                if sliceAngle > 180.0 && hasZeroInnerRadius && accountForSliceSpacing
                 {
-                    let angleMiddle = startAngleOuter + sweepAngleOuter / 2.0
-
-                    let sliceSpaceOffset =
-                        calculateMinimumRadiusForSpacedSlice(
-                            center: center,
-                            radius: radius,
-                            angle: sliceAngle * CGFloat(phaseY),
-                            arcStartPointX: arcStartPointX,
-                            arcStartPointY: arcStartPointY,
-                            startAngle: startAngleOuter,
-                            sweepAngle: sweepAngleOuter)
-
-                    let arcEndPointX = center.x + sliceSpaceOffset * cos(angleMiddle.DEG2RAD)
-                    let arcEndPointY = center.y + sliceSpaceOffset * sin(angleMiddle.DEG2RAD)
+                    let midAngleInner = (startAngleInner + endAngleInner) / 2
 
                     path.addLine(
                         to: CGPoint(
-                            x: arcEndPointX,
-                            y: arcEndPointY))
+                            x: center.x + innerRadius * cos(midAngleInner.DEG2RAD),
+                            y: center.y + innerRadius * sin(midAngleInner.DEG2RAD)))
                 }
                 else
                 {
-                    path.addLine(to: center)
+                    path.addLine(
+                        to: CGPoint(
+                            x: center.x + innerRadius * cos(endAngleInner.DEG2RAD),
+                            y: center.y + innerRadius * sin(endAngleInner.DEG2RAD)))
+
+                    path.addRelativeArc(center: center, radius: innerRadius, startAngle: endAngleInner.DEG2RAD, delta: -sweepAngleInner.DEG2RAD)
                 }
+            }
+            else
+            {
+                path.addLine(to: center)
             }
 
             path.closeSubpath()
@@ -518,7 +507,7 @@ open class PieChartRenderer: NSObject, DataRenderer
                 {
                     // calculate the text position
                     let x = labelRadius * sliceXBase + center.x
-                    let y = labelRadius * sliceYBase + center.y - lineHeight
+                    let y = labelRadius * sliceYBase + center.y - lineHeight / 2.0
 
                     if drawXInside && drawYInside
                     {
@@ -589,7 +578,9 @@ open class PieChartRenderer: NSObject, DataRenderer
     open func isDrawingValuesAllowed(dataProvider: ChartDataProvider?) -> Bool
     {
         guard let data = dataProvider?.data else { return false }
-        return data.entryCount < Int(CGFloat(dataProvider?.maxVisibleCount ?? 0) * viewPortHandler.scaleX)
+        let count = CGFloat(dataProvider?.maxVisibleCount ?? 0) * viewPortHandler.scaleX
+        guard count < CGFloat.infinity, !count.isNaN else { return false }
+        return data.entryCount < Int(count)
     }
 
     /// draws the hole in the center of the chart and the transparent circle / hole
@@ -716,8 +707,6 @@ open class PieChartRenderer: NSObject, DataRenderer
         let absoluteAngles = chart.absoluteAngles
         let center = chart.centerCircleBox
         let radius = chart.radius
-        let drawInnerArc = chart.drawHoleEnabled && !chart.drawSlicesUnderHoleEnabled
-        let userInnerRadius = drawInnerArc ? radius * chart.holeRadiusPercent : 0.0
 
         // Append highlighted accessibility slices into this array, so we can prioritize them over unselected slices
         var highlightedAccessibleElements: [NSUIAccessibilityElement] = []
@@ -727,7 +716,7 @@ open class PieChartRenderer: NSObject, DataRenderer
             // get the index to highlight
             let index = Int(hightlight.x)
             guard index < drawAngles.count,
-                  let set = data[hightlight.dataSetIndex] as? PieChartDataSetProtocol,
+                  let set = data[safe: hightlight.dataSetIndex] as? PieChartDataSetProtocol,
                   set.isHighlightEnabled
             else
             {
@@ -755,6 +744,8 @@ open class PieChartRenderer: NSObject, DataRenderer
             }
 
             let sliceSpace = visibleAngleCount <= 1 ? 0.0 : set.sliceSpace
+            let drawInnerArc = chart.drawHoleEnabled && !chart.drawSlicesUnderHoleEnabled || sliceSpace > 0.0
+            let userInnerRadius = drawInnerArc ? radius * chart.holeRadiusPercent : 0.0
 
             let sliceAngle = drawAngles[index]
             var innerRadius = userInnerRadius
@@ -762,7 +753,7 @@ open class PieChartRenderer: NSObject, DataRenderer
             let shift = set.selectionShift
             let highlightedRadius = radius + shift
 
-            let accountForSliceSpacing = sliceSpace > 0.0 && sliceAngle <= 180.0
+            let accountForSliceSpacing = sliceSpace > 0.0
 
             context.setFillColor(set.highlightColor?.cgColor ?? set.color(atIndex: index).cgColor)
 
@@ -812,6 +803,8 @@ open class PieChartRenderer: NSObject, DataRenderer
             if drawInnerArc &&
                 (innerRadius > 0.0 || accountForSliceSpacing)
             {
+                var hasZeroInnerRadius = innerRadius == 0.0
+
                 if accountForSliceSpacing
                 {
                     var minSpacedRadius = sliceSpaceRadius
@@ -833,33 +826,30 @@ open class PieChartRenderer: NSObject, DataRenderer
                 }
                 let endAngleInner = startAngleInner + sweepAngleInner
 
-                path.addLine(
-                    to: CGPoint(
-                        x: center.x + innerRadius * cos(endAngleInner.DEG2RAD),
-                        y: center.y + innerRadius * sin(endAngleInner.DEG2RAD)))
-
-                path.addRelativeArc(center: center, radius: innerRadius,
-                                    startAngle: endAngleInner.DEG2RAD,
-                                    delta: -sweepAngleInner.DEG2RAD)
-            }
-            else
-            {
-                if accountForSliceSpacing
+                if sliceAngle > 180.0 && hasZeroInnerRadius && accountForSliceSpacing
                 {
-                    let angleMiddle = startAngleOuter + sweepAngleOuter / 2.0
-
-                    let arcEndPointX = center.x + sliceSpaceRadius * cos(angleMiddle.DEG2RAD)
-                    let arcEndPointY = center.y + sliceSpaceRadius * sin(angleMiddle.DEG2RAD)
+                    let midAngleInner = (startAngleInner + endAngleInner) / 2
 
                     path.addLine(
                         to: CGPoint(
-                            x: arcEndPointX,
-                            y: arcEndPointY))
+                            x: center.x + innerRadius * cos(midAngleInner.DEG2RAD),
+                            y: center.y + innerRadius * sin(midAngleInner.DEG2RAD)))
                 }
                 else
                 {
-                    path.addLine(to: center)
+                    path.addLine(
+                        to: CGPoint(
+                            x: center.x + innerRadius * cos(endAngleInner.DEG2RAD),
+                            y: center.y + innerRadius * sin(endAngleInner.DEG2RAD)))
+
+                    path.addRelativeArc(center: center, radius: innerRadius,
+                                        startAngle: endAngleInner.DEG2RAD,
+                                        delta: -sweepAngleInner.DEG2RAD)
                 }
+            }
+            else
+            {
+                path.addLine(to: center)
             }
 
             path.closeSubpath()
