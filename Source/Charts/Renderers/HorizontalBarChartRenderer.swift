@@ -228,7 +228,15 @@ open class HorizontalBarChartRenderer: BarChartRenderer
                 _barShadowRectBuffer.size.width = viewPortHandler.contentWidth
                 
                 context.setFillColor(dataSet.barShadowColor.cgColor)
-                context.fill(_barShadowRectBuffer)
+                
+                var roundedCorners = dataSet.roundedCorners
+                if e.x < 0 {
+                    roundedCorners = dataSet.roundedCornersInverted
+                }
+                let bezierPath = UIBezierPath(roundedRect: _barShadowRectBuffer, byRoundingCorners: roundedCorners,
+                                              cornerRadii: .init(width: dataSet.cornerRadius, height: dataSet.cornerRadius))
+                context.addPath(bezierPath.cgPath)
+                context.drawPath(using: .fill)
             }
         }
         
@@ -265,7 +273,15 @@ open class HorizontalBarChartRenderer: BarChartRenderer
                 context.setFillColor(dataSet.color(atIndex: j).cgColor)
             }
 
-            context.fill(barRect)
+            var roundedCorners = dataSet.roundedCorners
+            if let entry = dataSet.entryForIndex(j),
+               entry.x < 0 {
+                roundedCorners = dataSet.roundedCornersInverted
+            }
+            let bezierPath = UIBezierPath(roundedRect: barRect, byRoundingCorners: roundedCorners,
+                                          cornerRadii: .init(width: dataSet.cornerRadius, height: dataSet.cornerRadius))
+            context.addPath(bezierPath.cgPath)
+            context.drawPath(using: .fill)
 
             if drawBorder
             {
@@ -614,9 +630,10 @@ open class HorizontalBarChartRenderer: BarChartRenderer
     
     open override func isDrawingValuesAllowed(dataProvider: ChartDataProvider?) -> Bool
     {
-        guard let data = dataProvider?.data
-            else { return false }
-        return data.entryCount < Int(CGFloat(dataProvider?.maxVisibleCount ?? 0) * self.viewPortHandler.scaleY)
+        guard let data = dataProvider?.data else { return false }
+        let count = CGFloat(dataProvider?.maxVisibleCount ?? 0) * viewPortHandler.scaleY
+        guard count < CGFloat.infinity, !count.isNaN else { return false }
+        return data.entryCount < Int(count)
     }
     
     /// Sets the drawing position of the highlight object based on the riven bar-rect.
